@@ -34,6 +34,7 @@ library(stringr)
 library(lubridate)
 library(readr)
 library(ggplot2)
+library(scales)
 ```
 
 ## User settings
@@ -154,4 +155,77 @@ message("Saved plot to: ", output_plot)
 ```
 
 
+## User settings
 
+```{r}
+#| label: skyline-user-settings
+
+skyline_file <- "Data/Clade1_BS_analysis_2014.696.txt"   # your exported Tracer skyline text file
+```
+
+## Read the data
+
+The file has a title row before the real header (`time  date  datetime
+milliseconds  mean  median  upper  lower`), so we skip the first line.
+
+```{r}
+#| label: read-skyline
+
+skyline <- read_tsv(skyline_file, skip = 1, show_col_types = FALSE)
+skyline
+```
+
+```{r}
+#| label: inspect-skyline
+
+glimpse(skyline)
+```
+
+## Plot
+
+`time` is already a decimal calendar year (e.g. `2014.696`), so it can be
+used directly on the x-axis without further conversion. Population size is
+plotted on a log scale, which is standard for skyline plots since Ne can
+span orders of magnitude.
+
+```{r}
+#| label: plot-skyline
+#| fig-width: 9
+#| fig-height: 6
+
+p_skyline <- ggplot(skyline, aes(x = time)) +
+  geom_ribbon(aes(ymin = lower, ymax = upper), fill = "steelblue", alpha = 0.25) +
+  geom_line(aes(y = median), color = "steelblue4", linewidth = 0.8) +
+  scale_y_log10(labels = scales::comma) +
+  scale_x_continuous(breaks = scales::pretty_breaks(n = 12)) +
+  labs(
+    x = "Year",
+    y = "Effective population size (log scale)",
+    title = "Bayesian Skyline Plot"
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(
+    panel.grid.minor = element_blank(),
+    panel.grid.major = element_line(color = "grey88")
+  )
+
+p_skyline
+
+p_skyline <- ggplot(skyline, aes(x = time)) +
+  geom_ribbon(aes(ymin = lower, ymax = upper), fill = "steelblue", alpha = 0.25) +
+  geom_line(aes(y = median), color = "steelblue4", linewidth = 0.8) +
+  scale_y_continuous(labels = scales::comma) +
+  scale_x_continuous(breaks = scales::pretty_breaks(n = 12)) +
+  labs(
+    x = "Year",
+    y = "Effective population size (Ne \u00d7 generation time)",
+    title = "Bayesian Skyline Plot"
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(
+    panel.grid.minor = element_blank(),
+    panel.grid.major = element_line(color = "grey88")
+  )
+
+p_skyline
+```
