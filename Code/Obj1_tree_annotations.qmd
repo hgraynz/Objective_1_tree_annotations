@@ -1,0 +1,157 @@
+---
+title: "Obj_1_tree_annotations"
+format:
+  html:
+    toc: true
+    code-fold: false
+execute:
+  warning: false
+  message: false
+---
+
+## Overview
+
+This notebook reads a TreeAnnotator output tree (with all its embedded BEAST
+annotations), calibrates the x-axis to calendar time using the most recent
+tip's sampling date, joins an external metadata TSV onto the tips, and
+produces a time-scaled tree figure with year gridlines and node-age
+uncertainty bars.
+
+Edit the **User settings** chunk below, then run the whole document
+(`Render` or `Ctrl/Cmd + Shift + K`).
+
+## Setup
+
+
+```{r}
+#| label: load-packages
+
+library(treeio)
+library(ggtree)
+library(dplyr)
+library(tidyr)
+library(stringr)
+library(lubridate)
+library(readr)
+library(ggplot2)
+```
+
+## User settings
+
+Edit these to match your files and analysis.
+
+```{r}
+#| label: user-settings
+
+setwd("~/Objective1_BEAST/Objective_1_tree_annotations")
+ 
+tree_file     <- "Data/Clade1_GTR_strict_BICEPS_comb_500_annotated.trees"    # your TreeAnnotator output file
+
+# Your tip labels are structured as: isolate_ID|SBI|Island|Source|date
+# List the field names in that exact order here:
+tip_label_fields <- c("isolate_ID", "SBI", "Island", "Source", "date")
+tip_label_sep    <- "|"
+
+year_gridline_every <- 5           # gridline spacing, in years
+output_plot   <- "time_tree.pdf"   # output figure filename
+```
+
+## Read the tree
+
+Reads the tree while keeping all BEAST/TreeAnnotator annotations (posterior,
+height_95%_HPD, rate, etc.) attached to each node.
+
+```{r}
+#| label: read-tree
+
+beast_tree <- read.beast(tree_file)
+beast_tree
+```
+
+Check which annotation fields are available — useful for confirming the exact
+name of the HPD field before plotting (it can appear as `height_0.95_HPD` or
+`height_95%_HPD` depending on TreeAnnotator settings/version):
+
+```{r}
+#| label: inspect-annotations
+
+names(as_tibble(beast_tree))
+```
+
+## Parse metadata out of the tip labels
+
+Since your metadata is already embedded in each tip label
+(`isolate_ID|SBI|Island|Source|date`), we split on `|` to recover it as a
+proper table, rather than needing a separate TSV. `Name` is kept as the
+**full original tip label**, unchanged, so it still matches the tree exactly
+for the join later.
+
+```{r}
+tree_tips <- beast_tree@phylo$tip.label
+
+metadata <- tibble(Name = tree_tips) |>
+  separate_wider_delim(Name, delim = tip_label_sep, names = tip_label_fields,
+                        cols_remove = FALSE, too_many = "merge",
+                        too_few = "align_start") |>
+  mutate(date_parsed = dmy(date)) |>
+  relocate(Name)
+
+metadata
+```
+
+```{r}
+#| label: check-date-parsing
+
+# Flag any tip whose date field failed to parse -- fix these in the
+# tip labels (or check for a different date format) before continuing.
+metadata |> filter(is.na(date_parsed)) |> select(Name, date)
+```
+
+```{r}
+#| label: most-recent-tip-date
+
+most_recent_tip_date <- max(metadata$date_parsed, na.rm = TRUE)
+most_recent_tip_date
+```
+
+This is auto-detected from the `date` field across all tips — double-check
+it looks right (i.e. it's genuinely your youngest sample) before moving on.
+
+## Build the plot
+
+`mrsd` ("most recent sampling date") is what calibrates the x-axis to real
+calendar time, using the node heights TreeAnnotator already calculated.
+
+```{r}
+#| label: build-plot
+#| fig-width: 10
+#| fig-height: 8
+
+p <- ggtree(beast_tree, mrsd = as.character(most_recent_tip_date),
+            ladderize = TRUE) %<+% metadata +   # joins parsed metadata by "Name"/tip label
+  theme_tree2() +
+  #geom_range(range = "height_0.95_HPD", color = "steelblue", alpha = 0.4, size = 2) +
+  geom_tippoint(aes(color = Source), size = 2) +
+  geom_tiplab(aes(label = isolate_ID), size = 2.5, offset = 0.3) +
+  scale_x_continuous(breaks = scales::pretty_breaks(n = 15)) +
+  theme(
+    panel.grid.major.x = element_line(color = "grey85", linewidth = 0.3),
+    panel.grid.minor.x = element_blank(),
+    legend.position = "right"
+  ) +
+  labs(x = "Year", color = "Source")
+
+p
+```
+
+## Save the figure
+
+```{r}
+#| label: save-plot
+
+ggsave(output_plot, plot = p, width = 10, height = 8, units = "in")
+message("Saved plot to: ", output_plot)
+```
+
+
+
