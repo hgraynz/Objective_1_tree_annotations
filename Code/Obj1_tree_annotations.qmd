@@ -37,9 +37,8 @@ library(ggplot2)
 library(scales)
 ```
 
-## User settings
+## Clade 1
 
-Edit these to match your files and analysis.
 
 ```{r}
 #| label: user-settings
@@ -229,3 +228,202 @@ p_skyline <- ggplot(skyline, aes(x = time)) +
 
 p_skyline
 ```
+
+
+
+## Clade 2
+
+
+```{r}
+#| label: user-settings
+
+setwd("~/Objective1_BEAST/Objective_1_tree_annotations")
+ 
+tree_file     <- "Data/Clade2_GTR_strict_BICEPS_comb_500_annotated.trees"    # your TreeAnnotator output file
+
+# Your tip labels are structured as: isolate_ID|SBI|Island|Source|date
+# List the field names in that exact order here:
+tip_label_fields <- c("isolate_ID", "SBI", "Island", "Source", "date")
+tip_label_sep    <- "|"
+
+year_gridline_every <- 5           # gridline spacing, in years
+output_plot   <- "time_tree.pdf"   # output figure filename
+```
+
+## Read the tree
+
+Reads the tree while keeping all BEAST/TreeAnnotator annotations (posterior,
+height_95%_HPD, rate, etc.) attached to each node.
+
+```{r}
+#| label: read-tree
+
+beast_tree <- read.beast(tree_file)
+beast_tree
+```
+
+Check which annotation fields are available — useful for confirming the exact
+name of the HPD field before plotting (it can appear as `height_0.95_HPD` or
+`height_95%_HPD` depending on TreeAnnotator settings/version):
+
+```{r}
+#| label: inspect-annotations
+
+names(as_tibble(beast_tree))
+```
+
+## Parse metadata out of the tip labels
+
+Since your metadata is already embedded in each tip label
+(`isolate_ID|SBI|Island|Source|date`), we split on `|` to recover it as a
+proper table, rather than needing a separate TSV. `Name` is kept as the
+**full original tip label**, unchanged, so it still matches the tree exactly
+for the join later.
+
+```{r}
+tree_tips <- beast_tree@phylo$tip.label
+
+metadata <- tibble(Name = tree_tips) |>
+  separate_wider_delim(Name, delim = tip_label_sep, names = tip_label_fields,
+                        cols_remove = FALSE, too_many = "merge",
+                        too_few = "align_start") |>
+  mutate(date_parsed = dmy(date)) |>
+  relocate(Name)
+
+metadata
+```
+
+```{r}
+#| label: check-date-parsing
+
+# Flag any tip whose date field failed to parse -- fix these in the
+# tip labels (or check for a different date format) before continuing.
+metadata |> filter(is.na(date_parsed)) |> select(Name, date)
+```
+
+```{r}
+#| label: most-recent-tip-date
+
+most_recent_tip_date <- max(metadata$date_parsed, na.rm = TRUE)
+most_recent_tip_date
+```
+
+This is auto-detected from the `date` field across all tips — double-check
+it looks right (i.e. it's genuinely your youngest sample) before moving on.
+
+## Build the plot
+
+`mrsd` ("most recent sampling date") is what calibrates the x-axis to real
+calendar time, using the node heights TreeAnnotator already calculated.
+
+```{r}
+#| label: build-plot
+#| fig-width: 10
+#| fig-height: 8
+
+p <- ggtree(beast_tree, mrsd = as.character(most_recent_tip_date),
+            ladderize = TRUE) %<+% metadata +   # joins parsed metadata by "Name"/tip label
+  theme_tree2() +
+  #geom_range(range = "height_0.95_HPD", color = "steelblue", alpha = 0.4, size = 2) +
+  geom_tippoint(aes(color = Source), size = 2) +
+  geom_tiplab(aes(label = isolate_ID), size = 2.5, offset = 0.3) +
+  scale_x_continuous(breaks = scales::pretty_breaks(n = 15)) +
+  theme(
+    panel.grid.major.x = element_line(color = "grey85", linewidth = 0.3),
+    panel.grid.minor.x = element_blank(),
+    legend.position = "right"
+  ) +
+  labs(x = "Year", color = "Source")
+
+p
+```
+
+## Save the figure
+
+```{r}
+#| label: save-plot
+
+ggsave(output_plot, plot = p, width = 10, height = 8, units = "in")
+message("Saved plot to: ", output_plot)
+```
+
+
+## User settings
+
+```{r}
+#| label: skyline-user-settings
+
+skyline_file <- "Data/Clade2_BS_analysis_2014.712.txt"   # your exported Tracer skyline text file
+```
+
+## Read the data
+
+The file has a title row before the real header (`time  date  datetime
+milliseconds  mean  median  upper  lower`), so we skip the first line.
+
+```{r}
+#| label: read-skyline
+
+skyline <- read_tsv(skyline_file, skip = 1, show_col_types = FALSE)
+skyline
+```
+
+```{r}
+#| label: inspect-skyline
+
+glimpse(skyline)
+```
+
+## Plot
+
+`time` is already a decimal calendar year (e.g. `2014.696`), so it can be
+used directly on the x-axis without further conversion. Population size is
+plotted on a log scale, which is standard for skyline plots since Ne can
+span orders of magnitude.
+
+```{r}
+#| label: plot-skyline
+#| fig-width: 9
+#| fig-height: 6
+
+p_skyline <- ggplot(skyline, aes(x = time)) +
+  geom_ribbon(aes(ymin = lower, ymax = upper), fill = "steelblue", alpha = 0.25) +
+  geom_line(aes(y = median), color = "steelblue4", linewidth = 0.8) +
+  scale_y_log10(labels = scales::comma) +
+  scale_x_continuous(breaks = scales::pretty_breaks(n = 12)) +
+  labs(
+    x = "Year",
+    y = "Effective population size (log scale)",
+    title = "Bayesian Skyline Plot"
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(
+    panel.grid.minor = element_blank(),
+    panel.grid.major = element_line(color = "grey88")
+  )
+
+p_skyline
+
+p_skyline <- ggplot(skyline, aes(x = time)) +
+  geom_ribbon(aes(ymin = lower, ymax = upper), fill = "steelblue", alpha = 0.25) +
+  geom_line(aes(y = median), color = "steelblue4", linewidth = 0.8) +
+  scale_y_continuous(labels = scales::comma) +
+  scale_x_continuous(breaks = scales::pretty_breaks(n = 12)) +
+  labs(
+    x = "Year",
+    y = "Effective population size (Ne \u00d7 generation time)",
+    title = "Bayesian Skyline Plot"
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(
+    panel.grid.minor = element_blank(),
+    panel.grid.major = element_line(color = "grey88")
+  )
+
+p_skyline
+```
+
+
+
+
+
