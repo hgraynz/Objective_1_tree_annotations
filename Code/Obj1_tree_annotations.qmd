@@ -35,6 +35,8 @@ library(lubridate)
 library(readr)
 library(ggplot2)
 library(scales)
+library(ggnewscale) 
+library(tibble)
 ```
 
 ## Clade 1
@@ -87,16 +89,31 @@ proper table, rather than needing a separate TSV. `Name` is kept as the
 for the join later.
 
 ```{r}
+#| label: parse-tip-labels
+
 tree_tips <- beast_tree@phylo$tip.label
 
 metadata <- tibble(Name = tree_tips) |>
   separate_wider_delim(Name, delim = tip_label_sep, names = tip_label_fields,
                         cols_remove = FALSE, too_many = "merge",
                         too_few = "align_start") |>
-  mutate(date_parsed = dmy(date)) |>
-  relocate(Name)
+  mutate(
+    # some pipe-delimited fields (e.g. Island) are blank for certain tips --
+    # convert empty strings to real NA so they're handled as missing data
+    # downstream, rather than an unmatched category that renders grey
+    across(all_of(tip_label_fields), ~ na_if(.x, "")),
+    # dates in tip labels are dd/mm/yyyy, e.g. "27/04/2014"
+    date_parsed = dmy(date)
+  ) |>
+  relocate(Name)   # %<+% joins on the FIRST column, so Name must lead
 
 metadata
+
+
+# quick check: how many tips are missing data in each field
+metadata |>
+  summarise(across(all_of(tip_label_fields), ~ sum(is.na(.x)))) |>
+  pivot_longer(everything(), names_to = "field", values_to = "n_missing")
 ```
 
 ```{r}
@@ -122,18 +139,21 @@ it looks right (i.e. it's genuinely your youngest sample) before moving on.
 `mrsd` ("most recent sampling date") is what calibrates the x-axis to real
 calendar time, using the node heights TreeAnnotator already calculated.
 
-```{r}
-#| label: build-plot
-#| fig-width: 10
+
+
+``` {r}
+#| label: build-annotated-tree
+#| fig-width: 16
 #| fig-height: 8
 
-p <- ggtree(beast_tree, mrsd = as.character(most_recent_tip_date),
-            ladderize = TRUE) %<+% metadata +   # joins parsed metadata by "Name"/tip label
+# ---- Base tree, built once ----
+p <- ggtree(beast_tree, mrsd = as.character(most_recent_tip_date), ladderize = TRUE) %<+% metadata +
   theme_tree2() +
-  #geom_range(range = "height_0.95_HPD", color = "steelblue", alpha = 0.4, size = 2) +
+  # node age uncertainty (95% HPD bars) -- rename if your field is named differently
+  geom_range(range = "height_0.95_HPD", color = "steelblue", alpha = 0.4, linewidth = 2) +
   geom_tippoint(aes(color = Source), size = 2) +
-  geom_tiplab(aes(label = isolate_ID), size = 2.5, offset = 0.3) +
-  scale_x_continuous(breaks = scales::pretty_breaks(n = 15)) +
+  # aligned tip labels with dotted guide lines back to the actual tip position
+  geom_tiplab(aes(label = isolate_ID), size = 2, offset = 0.3, align = TRUE, linetype = "dotted") +
   theme(
     panel.grid.major.x = element_line(color = "grey85", linewidth = 0.3),
     panel.grid.minor.x = element_blank(),
@@ -141,8 +161,93 @@ p <- ggtree(beast_tree, mrsd = as.character(most_recent_tip_date),
   ) +
   labs(x = "Year", color = "Source")
 
-p
+# ---- Fixed tick/gridline positions, based on the tree's real range only ----
+# (a live scales::pretty_breaks() function gets re-evaluated against the
+# strip-widened panel later, which is why ticks kept extending outward)
+tree_x_breaks <- scales::pretty_breaks(n = 15)(range(p$data$x, na.rm = TRUE))
+p <- p + scale_x_continuous(breaks = tree_x_breaks)
+
+# ---- Strip data: one column each, tip labels as row names ----
+island_data <- metadata |> select(Name, Island) |> column_to_rownames("Name")
+sbi_data    <- metadata |> select(Name, SBI)    |> column_to_rownames("Name")
+
+# ---- Strip data: one column each, tip labels as row names ----
+# Island NAs converted to "Unknown" so they can be coloured as an ordinary
+# category (see island_colors below). Using the literal string "NA" here
+# instead can get silently re-interpreted as a true missing value again by
+# later steps, so "Unknown" is the safer, unambiguous choice.
+island_data <- metadata |>
+  mutate(Island = ifelse(is.na(Island), "Unknown", Island)) |>
+  select(Name, Island) |>
+  column_to_rownames("Name")
+sbi_data    <- metadata |> select(Name, SBI)    |> column_to_rownames("Name")
+
+# ---- Strip sizing, based on the tree's actual year-span ----
+tree_width_years  <- diff(range(p$data$x, na.rm = TRUE))
+offset1           <- 0.18 * tree_width_years    # space for tip labels before Island strip
+strip_width_frac  <- 0.04                       # each strip = 4% of tree width
+strip_width_years <- strip_width_frac * tree_width_years
+gap_years         <- 0.5                        # gap between the two strips
+offset2           <- offset1 + strip_width_years + gap_years
+
+# ---- Custom colour palettes -- edit to match your actual categories ----
+island_colors <- c(
+  "NI" = "#a6cee3",
+  "SI" = "#b2df8a",
+  "Unknown"="#ffffff"
+)
+
+sbi_colors <- c(
+"AY2a"=	"#1F77B4",
+"ASY2c"=	"#AEC7E8",
+"WY12a"=	"#FF7F0E",
+"Y12a"=	"#FFBB78",
+"AS2c"=	"#2CA02C",
+"SY2c"=	"#98DF8A",
+"A2a"=	"#D62728",
+"AWY2a"=	"#FF9896",
+"Y1a"=	"#9467BD",
+"AS12c"=	"#C5B0D5",
+"ASWY2c"=	"#8C564B",
+"ASY"	="#C49C94",
+"ASY12c"=	"#E377C2",
+"AWY12a"=	"#F7B6D2",
+"AY"=	"#7F7F7F",
+"SWY2c"=	"#C7C7C7",
+"WY1a"=	"#BCBD22",
+"Y2c"	="#DBDB8D"
+)
+
+# ---- Strip 1: Island ----
+p2 <- p + new_scale_fill()
+p2 <- gheatmap(
+  p2, island_data,
+  offset = offset1, width = strip_width_frac,
+  colnames_position = "top", colnames_angle = 90,
+  colnames_offset_y = 1.5, font.size = 3
+) +
+  scale_fill_manual(values = island_colors, name = "Island")
+
+# ---- Strip 2: SBI ----
+p2 <- p2 + new_scale_fill()
+p2 <- gheatmap(
+  p2, sbi_data,
+  offset = offset2, width = strip_width_frac,
+  colnames_position = "top", colnames_angle = 90,
+  colnames_offset_y = 1.5, font.size = 3
+) +
+  scale_fill_manual(values = sbi_colors, name = "SBI")
+
+# ---- Clamp the displayed x-axis range so it doesn't blow out into the far future ----
+p2 <- p2 + coord_cartesian(
+  xlim = c(min(p$data$x, na.rm = TRUE) - 5, max(p$data$x, na.rm = TRUE) + 25),
+  expand = FALSE
+)
+
+p2
+
 ```
+
 
 ## Save the figure
 
@@ -324,7 +429,7 @@ calendar time, using the node heights TreeAnnotator already calculated.
 p <- ggtree(beast_tree, mrsd = as.character(most_recent_tip_date),
             ladderize = TRUE) %<+% metadata +   # joins parsed metadata by "Name"/tip label
   theme_tree2() +
-  #geom_range(range = "height_0.95_HPD", color = "steelblue", alpha = 0.4, size = 2) +
+  geom_range(range = "height_0.95_HPD", color = "steelblue", alpha = 0.4, size = 2) +
   geom_tippoint(aes(color = Source), size = 2) +
   geom_tiplab(aes(label = isolate_ID), size = 2.5, offset = 0.3) +
   scale_x_continuous(breaks = scales::pretty_breaks(n = 15)) +
@@ -336,6 +441,90 @@ p <- ggtree(beast_tree, mrsd = as.character(most_recent_tip_date),
   labs(x = "Year", color = "Source")
 
 p
+```
+
+
+``` {r}
+#| label: build-annotated-tree
+#| fig-width: 16
+#| fig-height: 8
+
+# ---- Base tree, built once ----
+p <- ggtree(beast_tree, mrsd = as.character(most_recent_tip_date), ladderize = TRUE) %<+% metadata +
+  theme_tree2() +
+  # node age uncertainty (95% HPD bars) -- rename if your field is named differently
+  geom_range(range = "height_0.95_HPD", color = "steelblue", alpha = 0.4, linewidth = 2) +
+  geom_tippoint(aes(color = Source), size = 2) +
+  # aligned tip labels with dotted guide lines back to the actual tip position
+  geom_tiplab(aes(label = isolate_ID), size = 2, offset = 0.3, align = TRUE, linetype = "dotted") +
+  theme(
+    panel.grid.major.x = element_line(color = "grey85", linewidth = 0.3),
+    panel.grid.minor.x = element_blank(),
+    legend.position = "right"
+  ) +
+  labs(x = "Year", color = "Source")
+
+# ---- Fixed tick/gridline positions, based on the tree's real range only ----
+# (a live scales::pretty_breaks() function gets re-evaluated against the
+# strip-widened panel later, which is why ticks kept extending outward)
+tree_x_breaks <- scales::pretty_breaks(n = 15)(range(p$data$x, na.rm = TRUE))
+p <- p + scale_x_continuous(breaks = tree_x_breaks)
+
+# ---- Strip data: one column each, tip labels as row names ----
+island_data <- metadata |> select(Name, Island) |> column_to_rownames("Name")
+sbi_data    <- metadata |> select(Name, SBI)    |> column_to_rownames("Name")
+
+# ---- Strip sizing, based on the tree's actual year-span ----
+tree_width_years  <- diff(range(p$data$x, na.rm = TRUE))
+offset1           <- 0.18 * tree_width_years    # space for tip labels before Island strip
+strip_width_frac  <- 0.04                       # each strip = 4% of tree width
+strip_width_years <- strip_width_frac * tree_width_years
+gap_years         <- 0.5                        # gap between the two strips
+offset2           <- offset1 + strip_width_years + gap_years
+
+# ---- Custom colour palettes -- edit to match your actual categories ----
+island_colors <- c(
+  "NI" = "#1b9e77",
+  "SI" = "#d95f02"
+)
+
+sbi_colors <- c(
+  "WY12a"  = "darkred",
+  "Y2c"     = "lightblue",
+  "SY2c"   = "#4daf4a",
+  "Y12a" = "green",
+  "Y1a"  = "gold", 
+  "Y1"  = "violet",
+)
+
+# ---- Strip 1: Island ----
+p2 <- p + new_scale_fill()
+p2 <- gheatmap(
+  p2, island_data,
+  offset = offset1, width = strip_width_frac,
+  colnames_position = "top", colnames_angle = 90,
+  colnames_offset_y = 1.5, font.size = 3
+) +
+  scale_fill_manual(values = island_colors, name = "Island")
+
+# ---- Strip 2: SBI ----
+p2 <- p2 + new_scale_fill()
+p2 <- gheatmap(
+  p2, sbi_data,
+  offset = offset2, width = strip_width_frac,
+  colnames_position = "top", colnames_angle = 90,
+  colnames_offset_y = 1.5, font.size = 3
+) +
+  scale_fill_manual(values = sbi_colors, name = "SBI")
+
+# ---- Clamp the displayed x-axis range so it doesn't blow out into the far future ----
+p2 <- p2 + coord_cartesian(
+  xlim = c(min(p$data$x, na.rm = TRUE) - 5, max(p$data$x, na.rm = TRUE) + 25),
+  expand = FALSE
+)
+
+p2
+
 ```
 
 ## Save the figure
@@ -512,18 +701,20 @@ it looks right (i.e. it's genuinely your youngest sample) before moving on.
 `mrsd` ("most recent sampling date") is what calibrates the x-axis to real
 calendar time, using the node heights TreeAnnotator already calculated.
 
-```{r}
-#| label: build-plot
-#| fig-width: 10
+
+``` {r}
+#| label: build-annotated-tree
+#| fig-width: 16
 #| fig-height: 8
 
-p <- ggtree(beast_tree, mrsd = as.character(most_recent_tip_date),
-            ladderize = TRUE) %<+% metadata +   # joins parsed metadata by "Name"/tip label
+# ---- Base tree, built once ----
+p <- ggtree(beast_tree, mrsd = as.character(most_recent_tip_date), ladderize = TRUE) %<+% metadata +
   theme_tree2() +
-  #geom_range(range = "height_0.95_HPD", color = "steelblue", alpha = 0.4, size = 2) +
+  # node age uncertainty (95% HPD bars) -- rename if your field is named differently
+  geom_range(range = "height_0.95_HPD", color = "steelblue", alpha = 0.4, linewidth = 2) +
   geom_tippoint(aes(color = Source), size = 2) +
-  geom_tiplab(aes(label = isolate_ID), size = 2.5, offset = 0.3) +
-  scale_x_continuous(breaks = scales::pretty_breaks(n = 15)) +
+  # aligned tip labels with dotted guide lines back to the actual tip position
+  geom_tiplab(aes(label = isolate_ID), size = 2, offset = 0.3, align = TRUE, linetype = "dotted") +
   theme(
     panel.grid.major.x = element_line(color = "grey85", linewidth = 0.3),
     panel.grid.minor.x = element_blank(),
@@ -531,10 +722,74 @@ p <- ggtree(beast_tree, mrsd = as.character(most_recent_tip_date),
   ) +
   labs(x = "Year", color = "Source")
 
-p
+# ---- Fixed tick/gridline positions, based on the tree's real range only ----
+# (a live scales::pretty_breaks() function gets re-evaluated against the
+# strip-widened panel later, which is why ticks kept extending outward)
+tree_x_breaks <- scales::pretty_breaks(n = 15)(range(p$data$x, na.rm = TRUE))
+p <- p + scale_x_continuous(breaks = tree_x_breaks)
+
+# ---- Strip data: one column each, tip labels as row names ----
+island_data <- metadata |> select(Name, Island) |> column_to_rownames("Name")
+sbi_data    <- metadata |> select(Name, SBI)    |> column_to_rownames("Name")
+
+# ---- Strip sizing, based on the tree's actual year-span ----
+tree_width_years  <- diff(range(p$data$x, na.rm = TRUE))
+offset1           <- 0.18 * tree_width_years    # space for tip labels before Island strip
+strip_width_frac  <- 0.04                       # each strip = 4% of tree width
+strip_width_years <- strip_width_frac * tree_width_years
+gap_years         <- 0.5                        # gap between the two strips
+offset2           <- offset1 + strip_width_years + gap_years
+
+# ---- Custom colour palettes -- edit to match your actual categories ----
+island_colors <- c(
+  "NI" = "#1b9e77",
+  "SI" = "#d95f02"
+)
+
+sbi_colors <- c(
+  "ASY2c"  = "#e41a1c",
+  "AY"     = "#377eb8",
+  "SY2c"   = "#4daf4a",
+  "ASWY2c" = "#984ea3",
+  "AS12c"  = "yellow",
+  "AS2c"   = "orange",
+  "WY2c"   = "pink",
+  "ASY12c" = "darkblue",
+  # ---- this clade's actual values ----
+  "AY2a"   = "#f781bf",
+  "AWY2a"  = "#a65628",
+  "A2a"    = "#999999"
+)
+
+# ---- Strip 1: Island ----
+p2 <- p + new_scale_fill()
+p2 <- gheatmap(
+  p2, island_data,
+  offset = offset1, width = strip_width_frac,
+  colnames_position = "top", colnames_angle = 90,
+  colnames_offset_y = 1.5, font.size = 3
+) +
+  scale_fill_manual(values = island_colors, name = "Island")
+
+# ---- Strip 2: SBI ----
+p2 <- p2 + new_scale_fill()
+p2 <- gheatmap(
+  p2, sbi_data,
+  offset = offset2, width = strip_width_frac,
+  colnames_position = "top", colnames_angle = 90,
+  colnames_offset_y = 1.5, font.size = 3
+) +
+  scale_fill_manual(values = sbi_colors, name = "SBI")
+
+# ---- Clamp the displayed x-axis range so it doesn't blow out into the far future ----
+p2 <- p2 + coord_cartesian(
+  xlim = c(min(p$data$x, na.rm = TRUE) - 5, max(p$data$x, na.rm = TRUE) + 25),
+  expand = FALSE
+)
+
+p2
+
 ```
-
-
 
 ## Save the figure
 
