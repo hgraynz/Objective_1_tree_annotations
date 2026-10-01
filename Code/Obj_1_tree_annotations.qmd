@@ -1,0 +1,712 @@
+---
+title: "Obj_1_tree_annotations"
+format:
+  html:
+    toc: true
+    code-fold: false
+execute:
+  warning: false
+  message: false
+---
+
+## Overview
+
+This notebook reads TreeAnnotator output trees (with all embedded BEAST
+annotations) for three clades, calibrates each x-axis to calendar time using
+the most recent tip's sampling date, parses metadata out of the tip labels,
+optionally overrides that metadata with an updated external file via a
+left join, and produces a time-scaled tree figure with node-age uncertainty
+bars and two custom-coloured annotation strips (Island, SBI) per clade. Each
+clade also gets its own Bayesian Skyline Plot section.
+
+**Every chunk label is now unique per clade** (suffixed `-clade1` /
+`-clade2` / `-clade3`) — this was required, not just tidy: Quarto errors on
+duplicate chunk labels within one document, which the previous version had
+throughout (three clades all reusing labels like `read-tree`,
+`build-annotated-tree`, `save-plot`, etc.).
+
+Edit each clade's **User settings** chunk, then run the whole document
+(`Render` or `Ctrl/Cmd + Shift + K`).
+
+## Setup
+
+```{r}
+#| label: load-packages
+
+library(treeio)
+library(ggtree)
+library(dplyr)
+library(tidyr)
+library(stringr)
+library(lubridate)
+library(readr)
+library(ggplot2)
+library(scales)
+library(ggnewscale)
+library(tibble)
+```
+
+## Updated metadata (optional, shared across clades)
+
+If you have an external file with corrected/updated Island, SBI, or Source
+values, load it here once. It gets left-joined onto each clade's
+tip-label-derived metadata by `isolate_ID`, with **new values taking
+priority and falling back to the tip-label value when the new file has no
+entry for that isolate**.
+
+**Edit the path, `read_csv`/`read_tsv` choice, and column names below to
+match your actual file** — this is currently a scaffold since the exact
+structure of your updated file hasn't been confirmed yet.
+
+```{r}
+#| label: load-updated-metadata
+
+use_updated_metadata <- TRUE   # now enabled
+
+updated_metadata <- read_csv("Data/Genome_summaries_144.csv", show_col_types = FALSE) |>
+  # keep only the columns we actually want, and rename the join key to match
+  # metadata's isolate_ID (note the file's own "SBI" column is used here,
+  # NOT "Automated SBI" / "Automated_SBI")
+  select(isolate_ID = `Isolate ID`, Island, SBI) |>
+  # blanks in this file are also empty strings, not real NA -- convert so
+  # coalesce() below correctly falls back to the tip-label value
+  mutate(across(c(Island, SBI), ~ na_if(.x, "")))
+```
+
+A small helper so this join logic isn't repeated three times:
+
+```{r}
+#| label: apply-updated-metadata-fn
+
+apply_updated_metadata <- function(metadata) {
+  if (!use_updated_metadata) return(metadata)
+
+  metadata |>
+    left_join(updated_metadata, by = "isolate_ID", suffix = c("_old", "_new")) |>
+    mutate(
+      Island = coalesce(Island_new, Island_old),
+      SBI    = coalesce(SBI_new, SBI_old)
+      # Source isn't in updated_metadata, so it's left untouched (no _old/_new
+      # suffix gets created for it by the join)
+    ) |>
+    select(-ends_with("_old"), -ends_with("_new"))
+}
+```
+
+# Clade 1
+
+## User settings
+
+```{r}
+#| label: user-settings-clade1
+
+setwd("~/Objective1_BEAST/Objective_1_tree_annotations")
+
+tree_file <- "Data/Clade1_GTR_strict_BICEPS_comb_500_annotated.trees"
+
+tip_label_fields <- c("isolate_ID", "SBI", "Island", "Source", "date")
+tip_label_sep    <- "|"
+
+year_gridline_every <- 5
+output_plot          <- "time_tree_clade1.pdf"
+output_skyline_plot  <- "bayesian_skyline_plot_clade1.pdf"
+skyline_file         <- "Data/Clade1_BS_analysis_2014.696.txt"
+```
+
+## Read the tree
+
+```{r}
+#| label: read-tree-clade1
+
+beast_tree <- read.beast(tree_file)
+beast_tree
+```
+
+```{r}
+#| label: inspect-annotations-clade1
+
+names(as_tibble(beast_tree))
+```
+
+## Parse metadata out of the tip labels
+
+```{r}
+#| label: parse-tip-labels-clade1
+
+tree_tips <- beast_tree@phylo$tip.label
+
+metadata <- tibble(Name = tree_tips) |>
+  separate_wider_delim(Name, delim = tip_label_sep, names = tip_label_fields,
+                        cols_remove = FALSE, too_many = "merge",
+                        too_few = "align_start") |>
+  mutate(
+    across(all_of(tip_label_fields), ~ na_if(.x, "")),
+    date_parsed = dmy(date)
+  ) |>
+  relocate(Name) |>
+  apply_updated_metadata()
+
+metadata
+
+metadata |>
+  summarise(across(all_of(tip_label_fields), ~ sum(is.na(.x)))) |>
+  pivot_longer(everything(), names_to = "field", values_to = "n_missing")
+```
+
+```{r}
+#| label: check-date-parsing-clade1
+
+metadata |> filter(is.na(date_parsed)) |> select(Name, date)
+```
+
+```{r}
+#| label: most-recent-tip-date-clade1
+
+most_recent_tip_date <- max(metadata$date_parsed, na.rm = TRUE)
+most_recent_tip_date
+```
+
+## Build the annotated tree
+
+```{r}
+#| label: build-annotated-tree-clade1
+#| fig-width: 16
+#| fig-height: 8
+
+p <- ggtree(beast_tree, mrsd = as.character(most_recent_tip_date), ladderize = TRUE) %<+% metadata +
+  theme_tree2() +
+  geom_range(range = "height_0.95_HPD", color = "steelblue", alpha = 0.4, linewidth = 2) +
+  geom_tippoint(aes(color = Source), size = 2) +
+  geom_tiplab(aes(label = isolate_ID), size = 2, offset = 0.3, align = TRUE, linetype = "dotted") +
+  theme(
+    panel.grid.major.x = element_line(color = "grey85", linewidth = 0.3),
+    panel.grid.minor.x = element_blank(),
+    legend.position = "right"
+  ) +
+  labs(x = "Year", color = "Source")
+
+tree_x_breaks <- scales::pretty_breaks(n = 15)(range(p$data$x, na.rm = TRUE))
+p <- p + scale_x_continuous(breaks = tree_x_breaks)
+
+island_data <- metadata |>
+  mutate(Island = ifelse(is.na(Island), "Unknown", Island)) |>
+  select(Name, Island) |>
+  column_to_rownames("Name")
+sbi_data <- metadata |> select(Name, SBI) |> column_to_rownames("Name")
+
+tree_width_years  <- diff(range(p$data$x, na.rm = TRUE))
+offset1           <- 0.18 * tree_width_years
+strip_width_frac  <- 0.04
+strip_width_years <- strip_width_frac * tree_width_years
+gap_years         <- 0.5
+offset2           <- offset1 + strip_width_years + gap_years
+
+island_colors <- c(
+  "NI" = "#a6cee3",
+  "SI" = "#b2df8a",
+  "Unknown" = "#ffffff"
+)
+
+sbi_colors <- c(
+  "AY2a" = "#1F77B4", "ASY2c" = "#AEC7E8", "WY12a" = "#FF7F0E", "Y12a" = "#FFBB78",
+  "AS2c" = "#2CA02C", "SY2c" = "#98DF8A", "A2a" = "#D62728", "AWY2a" = "#FF9896",
+  "Y1a" = "#9467BD", "AS12c" = "#C5B0D5", "ASWY2c" = "#8C564B", "ASY" = "#C49C94",
+  "ASY12c" = "#E377C2", "AWY12a" = "#F7B6D2", "AY" = "#7F7F7F", "SWY2c" = "#C7C7C7",
+  "WY1a" = "#BCBD22", "Y2c" = "#DBDB8D"
+)
+
+p2 <- p + new_scale_fill()
+p2 <- gheatmap(
+  p2, island_data,
+  offset = offset1, width = strip_width_frac,
+  colnames_position = "top", colnames_angle = 90,
+  colnames_offset_y = 1.5, font.size = 3
+) +
+  scale_fill_manual(values = island_colors, name = "Island")
+
+p2 <- p2 + new_scale_fill()
+p2 <- gheatmap(
+  p2, sbi_data,
+  offset = offset2, width = strip_width_frac,
+  colnames_position = "top", colnames_angle = 90,
+  colnames_offset_y = 1.5, font.size = 3
+) +
+  scale_fill_manual(values = sbi_colors, name = "SBI")
+
+p2 <- p2 + coord_cartesian(
+  xlim = c(min(p$data$x, na.rm = TRUE) - 5, max(p$data$x, na.rm = TRUE) + 25),
+  expand = FALSE
+)
+
+p2
+```
+
+## Save the figure
+
+```{r}
+#| label: save-plot-clade1
+
+n_tips <- length(beast_tree@phylo$tip.label)
+fig_height <- max(8, n_tips * 0.18)
+
+ggsave(output_plot, plot = p2, width = 16, height = fig_height, units = "in", limitsize = FALSE)
+message("Saved plot to: ", output_plot, " (height: ", round(fig_height, 1), " in)")
+```
+
+## Bayesian Skyline Plot
+
+```{r}
+#| label: read-skyline-clade1
+
+skyline <- read_tsv(skyline_file, skip = 1, show_col_types = FALSE)
+skyline
+```
+
+```{r}
+#| label: inspect-skyline-clade1
+
+glimpse(skyline)
+```
+
+```{r}
+#| label: plot-skyline-clade1
+#| fig-width: 9
+#| fig-height: 6
+
+p_skyline <- ggplot(skyline, aes(x = time)) +
+  geom_ribbon(aes(ymin = lower, ymax = upper), fill = "steelblue", alpha = 0.25) +
+  geom_line(aes(y = median), color = "steelblue4", linewidth = 0.8) +
+  scale_y_log10(labels = scales::comma) +
+  scale_x_continuous(breaks = scales::pretty_breaks(n = 12)) +
+  labs(
+    x = "Year",
+    y = "Effective population size (Ne \u00d7 generation time, log scale)",
+    title = "Bayesian Skyline Plot — Clade 1"
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(
+    panel.grid.minor = element_blank(),
+    panel.grid.major = element_line(color = "grey88")
+  )
+
+p_skyline
+```
+
+```{r}
+#| label: save-skyline-clade1
+
+ggsave(output_skyline_plot, plot = p_skyline, width = 9, height = 6, units = "in")
+message("Saved plot to: ", output_skyline_plot)
+```
+
+# Clade 2
+
+## User settings
+
+```{r}
+#| label: user-settings-clade2
+
+setwd("~/Objective1_BEAST/Objective_1_tree_annotations")
+
+tree_file <- "Data/Clade2_GTR_strict_BICEPS_comb_500_annotated.trees"
+
+tip_label_fields <- c("isolate_ID", "SBI", "Island", "Source", "date")
+tip_label_sep    <- "|"
+
+year_gridline_every <- 5
+output_plot          <- "time_tree_clade2.pdf"
+output_skyline_plot  <- "bayesian_skyline_plot_clade2.pdf"
+skyline_file         <- "Data/Clade2_BS_analysis_2014.712.txt"
+```
+
+## Read the tree
+
+```{r}
+#| label: read-tree-clade2
+
+beast_tree <- read.beast(tree_file)
+beast_tree
+```
+
+```{r}
+#| label: inspect-annotations-clade2
+
+names(as_tibble(beast_tree))
+```
+
+## Parse metadata out of the tip labels
+
+```{r}
+#| label: parse-tip-labels-clade2
+
+tree_tips <- beast_tree@phylo$tip.label
+
+metadata <- tibble(Name = tree_tips) |>
+  separate_wider_delim(Name, delim = tip_label_sep, names = tip_label_fields,
+                        cols_remove = FALSE, too_many = "merge",
+                        too_few = "align_start") |>
+  mutate(
+    across(all_of(tip_label_fields), ~ na_if(.x, "")),
+    date_parsed = dmy(date)
+  ) |>
+  relocate(Name) |>
+  apply_updated_metadata()
+
+metadata
+
+metadata |>
+  summarise(across(all_of(tip_label_fields), ~ sum(is.na(.x)))) |>
+  pivot_longer(everything(), names_to = "field", values_to = "n_missing")
+```
+
+```{r}
+#| label: check-date-parsing-clade2
+
+metadata |> filter(is.na(date_parsed)) |> select(Name, date)
+```
+
+```{r}
+#| label: most-recent-tip-date-clade2
+
+most_recent_tip_date <- max(metadata$date_parsed, na.rm = TRUE)
+most_recent_tip_date
+```
+
+## Build the annotated tree
+
+```{r}
+#| label: build-annotated-tree-clade2
+#| fig-width: 16
+#| fig-height: 8
+
+p <- ggtree(beast_tree, mrsd = as.character(most_recent_tip_date), ladderize = TRUE) %<+% metadata +
+  theme_tree2() +
+  geom_range(range = "height_0.95_HPD", color = "steelblue", alpha = 0.4, linewidth = 2) +
+  geom_tippoint(aes(color = Source), size = 2) +
+  geom_tiplab(aes(label = isolate_ID), size = 2, offset = 0.3, align = TRUE, linetype = "dotted") +
+  theme(
+    panel.grid.major.x = element_line(color = "grey85", linewidth = 0.3),
+    panel.grid.minor.x = element_blank(),
+    legend.position = "right"
+  ) +
+  labs(x = "Year", color = "Source")
+
+tree_x_breaks <- scales::pretty_breaks(n = 15)(range(p$data$x, na.rm = TRUE))
+p <- p + scale_x_continuous(breaks = tree_x_breaks)
+
+island_data <- metadata |>
+  mutate(Island = ifelse(is.na(Island), "Unknown", Island)) |>
+  select(Name, Island) |>
+  column_to_rownames("Name")
+sbi_data <- metadata |> select(Name, SBI) |> column_to_rownames("Name")
+
+tree_width_years  <- diff(range(p$data$x, na.rm = TRUE))
+offset1           <- 0.18 * tree_width_years
+strip_width_frac  <- 0.04
+strip_width_years <- strip_width_frac * tree_width_years
+gap_years         <- 0.5
+offset2           <- offset1 + strip_width_years + gap_years
+
+island_colors <- c(
+  "NI" = "#a6cee3",
+  "SI" = "#b2df8a",
+  "Unknown" = "#ffffff"
+)
+
+sbi_colors <- c(
+  "AY2a" = "#1F77B4", "ASY2c" = "#AEC7E8", "WY12a" = "#FF7F0E", "Y12a" = "#FFBB78",
+  "AS2c" = "#2CA02C", "SY2c" = "#98DF8A", "A2a" = "#D62728", "AWY2a" = "#FF9896",
+  "Y1a" = "#9467BD", "AS12c" = "#C5B0D5", "ASWY2c" = "#8C564B", "ASY" = "#C49C94",
+  "ASY12c" = "#E377C2", "AWY12a" = "#F7B6D2", "AY" = "#7F7F7F", "SWY2c" = "#C7C7C7",
+  "WY1a" = "#BCBD22", "Y2c" = "#DBDB8D"
+)
+
+p2 <- p + new_scale_fill()
+p2 <- gheatmap(
+  p2, island_data,
+  offset = offset1, width = strip_width_frac,
+  colnames_position = "top", colnames_angle = 90,
+  colnames_offset_y = 1.5, font.size = 3
+) +
+  scale_fill_manual(values = island_colors, name = "Island")
+
+p2 <- p2 + new_scale_fill()
+p2 <- gheatmap(
+  p2, sbi_data,
+  offset = offset2, width = strip_width_frac,
+  colnames_position = "top", colnames_angle = 90,
+  colnames_offset_y = 1.5, font.size = 3
+) +
+  scale_fill_manual(values = sbi_colors, name = "SBI")
+
+p2 <- p2 + coord_cartesian(
+  xlim = c(min(p$data$x, na.rm = TRUE) - 5, max(p$data$x, na.rm = TRUE) + 25),
+  expand = FALSE
+)
+
+p2
+```
+
+## Save the figure
+
+```{r}
+#| label: save-plot-clade2
+
+n_tips <- length(beast_tree@phylo$tip.label)
+fig_height <- max(8, n_tips * 0.18)
+
+ggsave(output_plot, plot = p2, width = 16, height = fig_height, units = "in", limitsize = FALSE)
+message("Saved plot to: ", output_plot, " (height: ", round(fig_height, 1), " in)")
+```
+
+## Bayesian Skyline Plot
+
+```{r}
+#| label: read-skyline-clade2
+
+skyline <- read_tsv(skyline_file, skip = 1, show_col_types = FALSE)
+skyline
+```
+
+```{r}
+#| label: inspect-skyline-clade2
+
+glimpse(skyline)
+```
+
+```{r}
+#| label: plot-skyline-clade2
+#| fig-width: 9
+#| fig-height: 6
+
+p_skyline <- ggplot(skyline, aes(x = time)) +
+  geom_ribbon(aes(ymin = lower, ymax = upper), fill = "steelblue", alpha = 0.25) +
+  geom_line(aes(y = median), color = "steelblue4", linewidth = 0.8) +
+  scale_y_log10(labels = scales::comma) +
+  scale_x_continuous(breaks = scales::pretty_breaks(n = 12)) +
+  labs(
+    x = "Year",
+    y = "Effective population size (Ne \u00d7 generation time, log scale)",
+    title = "Bayesian Skyline Plot — Clade 2"
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(
+    panel.grid.minor = element_blank(),
+    panel.grid.major = element_line(color = "grey88")
+  )
+
+p_skyline
+```
+
+```{r}
+#| label: save-skyline-clade2
+
+ggsave(output_skyline_plot, plot = p_skyline, width = 9, height = 6, units = "in")
+message("Saved plot to: ", output_skyline_plot)
+```
+
+# Clade 3
+
+## User settings
+
+```{r}
+#| label: user-settings-clade3
+
+setwd("~/Objective1_BEAST/Objective_1_tree_annotations")
+
+tree_file <- "Data/Clade3_GTR_strict_BICEPS_comb_500_annotated.trees"
+
+tip_label_fields <- c("isolate_ID", "SBI", "Island", "Source", "date")
+tip_label_sep    <- "|"
+
+year_gridline_every <- 5
+output_plot          <- "time_tree_clade3.pdf"
+output_skyline_plot  <- "bayesian_skyline_plot_clade3.pdf"
+skyline_file         <- "Data/Clade3_BS_analysis_2014.671.txt"
+```
+
+## Read the tree
+
+```{r}
+#| label: read-tree-clade3
+
+beast_tree <- read.beast(tree_file)
+beast_tree
+```
+
+```{r}
+#| label: inspect-annotations-clade3
+
+names(as_tibble(beast_tree))
+```
+
+## Parse metadata out of the tip labels
+
+```{r}
+#| label: parse-tip-labels-clade3
+
+tree_tips <- beast_tree@phylo$tip.label
+
+metadata <- tibble(Name = tree_tips) |>
+  separate_wider_delim(Name, delim = tip_label_sep, names = tip_label_fields,
+                        cols_remove = FALSE, too_many = "merge",
+                        too_few = "align_start") |>
+  mutate(
+    across(all_of(tip_label_fields), ~ na_if(.x, "")),
+    date_parsed = dmy(date)
+  ) |>
+  relocate(Name) |>
+  apply_updated_metadata()
+
+metadata
+
+metadata |>
+  summarise(across(all_of(tip_label_fields), ~ sum(is.na(.x)))) |>
+  pivot_longer(everything(), names_to = "field", values_to = "n_missing")
+```
+
+```{r}
+#| label: check-date-parsing-clade3
+
+metadata |> filter(is.na(date_parsed)) |> select(Name, date)
+```
+
+```{r}
+#| label: most-recent-tip-date-clade3
+
+most_recent_tip_date <- max(metadata$date_parsed, na.rm = TRUE)
+most_recent_tip_date
+```
+
+## Build the annotated tree
+
+```{r}
+#| label: build-annotated-tree-clade3
+#| fig-width: 16
+#| fig-height: 8
+
+p <- ggtree(beast_tree, mrsd = as.character(most_recent_tip_date), ladderize = TRUE) %<+% metadata +
+  theme_tree2() +
+  geom_range(range = "height_0.95_HPD", color = "steelblue", alpha = 0.4, linewidth = 2) +
+  geom_tippoint(aes(color = Source), size = 2) +
+  geom_tiplab(aes(label = isolate_ID), size = 2, offset = 0.3, align = TRUE, linetype = "dotted") +
+  theme(
+    panel.grid.major.x = element_line(color = "grey85", linewidth = 0.3),
+    panel.grid.minor.x = element_blank(),
+    legend.position = "right"
+  ) +
+  labs(x = "Year", color = "Source")
+
+tree_x_breaks <- scales::pretty_breaks(n = 15)(range(p$data$x, na.rm = TRUE))
+p <- p + scale_x_continuous(breaks = tree_x_breaks)
+
+island_data <- metadata |>
+  mutate(Island = ifelse(is.na(Island), "Unknown", Island)) |>
+  select(Name, Island) |>
+  column_to_rownames("Name")
+sbi_data <- metadata |> select(Name, SBI) |> column_to_rownames("Name")
+
+tree_width_years  <- diff(range(p$data$x, na.rm = TRUE))
+offset1           <- 0.18 * tree_width_years
+strip_width_frac  <- 0.04
+strip_width_years <- strip_width_frac * tree_width_years
+gap_years         <- 0.5
+offset2           <- offset1 + strip_width_years + gap_years
+
+island_colors <- c(
+  "NI" = "#a6cee3",
+  "SI" = "#b2df8a",
+  "Unknown" = "#ffffff"
+)
+
+sbi_colors <- c(
+  "AY2a" = "#1F77B4", "ASY2c" = "#AEC7E8", "WY12a" = "#FF7F0E", "Y12a" = "#FFBB78",
+  "AS2c" = "#2CA02C", "SY2c" = "#98DF8A", "A2a" = "#D62728", "AWY2a" = "#FF9896",
+  "Y1a" = "#9467BD", "AS12c" = "#C5B0D5", "ASWY2c" = "#8C564B", "ASY" = "#C49C94",
+  "ASY12c" = "#E377C2", "AWY12a" = "#F7B6D2", "AY" = "#7F7F7F", "SWY2c" = "#C7C7C7",
+  "WY1a" = "#BCBD22", "Y2c" = "#DBDB8D"
+)
+
+p2 <- p + new_scale_fill()
+p2 <- gheatmap(
+  p2, island_data,
+  offset = offset1, width = strip_width_frac,
+  colnames_position = "top", colnames_angle = 90,
+  colnames_offset_y = 1.5, font.size = 3
+) +
+  scale_fill_manual(values = island_colors, name = "Island")
+
+p2 <- p2 + new_scale_fill()
+p2 <- gheatmap(
+  p2, sbi_data,
+  offset = offset2, width = strip_width_frac,
+  colnames_position = "top", colnames_angle = 90,
+  colnames_offset_y = 1.5, font.size = 3
+) +
+  scale_fill_manual(values = sbi_colors, name = "SBI")
+
+p2 <- p2 + coord_cartesian(
+  xlim = c(min(p$data$x, na.rm = TRUE) - 5, max(p$data$x, na.rm = TRUE) + 25),
+  expand = FALSE
+)
+
+p2
+```
+
+## Save the figure
+
+```{r}
+#| label: save-plot-clade3
+
+n_tips <- length(beast_tree@phylo$tip.label)
+fig_height <- max(8, n_tips * 0.18)
+
+ggsave(output_plot, plot = p2, width = 16, height = fig_height, units = "in", limitsize = FALSE)
+message("Saved plot to: ", output_plot, " (height: ", round(fig_height, 1), " in)")
+```
+
+## Bayesian Skyline Plot
+
+```{r}
+#| label: read-skyline-clade3
+
+skyline <- read_tsv(skyline_file, skip = 1, show_col_types = FALSE)
+skyline
+```
+
+```{r}
+#| label: inspect-skyline-clade3
+
+glimpse(skyline)
+```
+
+```{r}
+#| label: plot-skyline-clade3
+#| fig-width: 9
+#| fig-height: 6
+
+p_skyline <- ggplot(skyline, aes(x = time)) +
+  geom_ribbon(aes(ymin = lower, ymax = upper), fill = "steelblue", alpha = 0.25) +
+  geom_line(aes(y = median), color = "steelblue4", linewidth = 0.8) +
+  scale_y_log10(labels = scales::comma) +
+  scale_x_continuous(breaks = scales::pretty_breaks(n = 12)) +
+  labs(
+    x = "Year",
+    y = "Effective population size (Ne \u00d7 generation time, log scale)",
+    title = "Bayesian Skyline Plot — Clade 3"
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(
+    panel.grid.minor = element_blank(),
+    panel.grid.major = element_line(color = "grey88")
+  )
+
+p_skyline
+```
+
+```{r}
+#| label: save-skyline-clade3
+
+ggsave(output_skyline_plot, plot = p_skyline, width = 9, height = 6, units = "in")
+message("Saved plot to: ", output_skyline_plot)
+```
