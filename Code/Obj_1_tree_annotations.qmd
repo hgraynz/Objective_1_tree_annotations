@@ -19,14 +19,6 @@ left join, and produces a time-scaled tree figure with node-age uncertainty
 bars and two custom-coloured annotation strips (Island, SBI) per clade. Each
 clade also gets its own Bayesian Skyline Plot section.
 
-**Every chunk label is now unique per clade** (suffixed `-clade1` /
-`-clade2` / `-clade3`) — this was required, not just tidy: Quarto errors on
-duplicate chunk labels within one document, which the previous version had
-throughout (three clades all reusing labels like `read-tree`,
-`build-annotated-tree`, `save-plot`, etc.).
-
-Edit each clade's **User settings** chunk, then run the whole document
-(`Render` or `Ctrl/Cmd + Shift + K`).
 
 ## Setup
 
@@ -48,15 +40,7 @@ library(tibble)
 
 ## Updated metadata (optional, shared across clades)
 
-If you have an external file with corrected/updated Island, SBI, or Source
-values, load it here once. It gets left-joined onto each clade's
-tip-label-derived metadata by `isolate_ID`, with **new values taking
-priority and falling back to the tip-label value when the new file has no
-entry for that isolate**.
-
-**Edit the path, `read_csv`/`read_tsv` choice, and column names below to
-match your actual file** — this is currently a scaffold since the exact
-structure of your updated file hasn't been confirmed yet.
+This is because some of the SBI types are not correct in the tip labels, so join on the metadata file.
 
 ```{r}
 #| label: load-updated-metadata
@@ -170,7 +154,7 @@ most_recent_tip_date
 
 ```{r}
 #| label: build-annotated-tree-clade1
-#| fig-width: 16
+#| fig-width: 12
 #| fig-height: 8
 
 p <- ggtree(beast_tree, mrsd = as.character(most_recent_tip_date), ladderize = TRUE) %<+% metadata +
@@ -201,12 +185,14 @@ strip_width_years <- strip_width_frac * tree_width_years
 gap_years         <- 0.5
 offset2           <- offset1 + strip_width_years + gap_years
 
+# The unknown island will appear as white
 island_colors <- c(
   "NI" = "#a6cee3",
   "SI" = "#b2df8a",
   "Unknown" = "#ffffff"
 )
 
+# SBI custom colours to match the other figures, just list them all and the ones needed will be used
 sbi_colors <- c(
   "AY2a" = "#1F77B4", "ASY2c" = "#AEC7E8", "WY12a" = "#FF7F0E", "Y12a" = "#FFBB78",
   "AS2c" = "#2CA02C", "SY2c" = "#98DF8A", "A2a" = "#D62728", "AWY2a" = "#FF9896",
@@ -235,8 +221,10 @@ p2 <- gheatmap(
 
 p2 <- p2 + coord_cartesian(
   xlim = c(min(p$data$x, na.rm = TRUE) - 5, max(p$data$x, na.rm = TRUE) + 25),
-  expand = FALSE
-)
+  expand = FALSE,
+  clip = "off"   # allow the rotated column-name labels to draw outside the panel
+) +
+  theme(plot.margin = margin(t = 30, r = 10, b = 10, l = 10))   # extra headroom at the top
 
 p2
 ```
@@ -441,8 +429,10 @@ p2 <- gheatmap(
 
 p2 <- p2 + coord_cartesian(
   xlim = c(min(p$data$x, na.rm = TRUE) - 5, max(p$data$x, na.rm = TRUE) + 25),
-  expand = FALSE
-)
+  expand = FALSE,
+  clip = "off"   # allow the rotated column-name labels to draw outside the panel
+) +
+  theme(plot.margin = margin(t = 30, r = 10, b = 10, l = 10))   # extra headroom at the top
 
 p2
 ```
@@ -647,8 +637,10 @@ p2 <- gheatmap(
 
 p2 <- p2 + coord_cartesian(
   xlim = c(min(p$data$x, na.rm = TRUE) - 5, max(p$data$x, na.rm = TRUE) + 25),
-  expand = FALSE
-)
+  expand = FALSE,
+  clip = "off"   # allow the rotated column-name labels to draw outside the panel
+) +
+  theme(plot.margin = margin(t = 30, r = 10, b = 10, l = 10))   # extra headroom at the top
 
 p2
 ```
