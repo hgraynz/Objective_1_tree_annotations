@@ -92,8 +92,6 @@ tip_label_fields <- c("isolate_ID", "SBI", "Island", "Source", "date")
 tip_label_sep    <- "|"
 
 year_gridline_every <- 5
-output_plot          <- "time_tree_clade1.pdf"
-output_skyline_plot  <- "bayesian_skyline_plot_clade1.pdf"
 skyline_file         <- "Data/Clade1_BS_analysis_2014.696.txt"
 ```
 
@@ -160,16 +158,20 @@ most_recent_tip_date
 p <- ggtree(beast_tree, mrsd = as.character(most_recent_tip_date), ladderize = TRUE) %<+% metadata +
   theme_tree2() +
   geom_range(range = "height_0.95_HPD", color = "steelblue", alpha = 0.4, linewidth = 2) +
-  geom_tippoint(aes(color = Source), size = 2) +
-  geom_tiplab(aes(label = isolate_ID), size = 2, offset = 0.3, align = TRUE, linetype = "dotted") +
+  geom_tippoint(aes(color = Source), size = 3) +
+  geom_tiplab(aes(label = isolate_ID), size = 3.5, offset = 1, align = TRUE, linetype = "dotted") +
   theme(
     panel.grid.major.x = element_line(color = "grey85", linewidth = 0.3),
     panel.grid.minor.x = element_blank(),
-    legend.position = "right"
+    legend.position = "right",
+    axis.text.x  = element_text(size = 12, angle = 45, hjust = 1),   # <-- year labels: size + angle
+    axis.title.x = element_text(size = 14)                           # <-- "Year" axis title
   ) +
   labs(x = "Year", color = "Source")
 
-tree_x_breaks <- scales::pretty_breaks(n = 15)(range(p$data$x, na.rm = TRUE))
+x_pad_past <- 5   # years of extra axis to the left of the root; increase until the bar is covered
+
+tree_x_breaks <- scales::pretty_breaks(n = 20)(range(p$data$x, na.rm = TRUE) - c(x_pad_past, 0))
 p <- p + scale_x_continuous(breaks = tree_x_breaks)
 
 island_data <- metadata |>
@@ -179,8 +181,8 @@ island_data <- metadata |>
 sbi_data <- metadata |> select(Name, SBI) |> column_to_rownames("Name")
 
 tree_width_years  <- diff(range(p$data$x, na.rm = TRUE))
-offset1           <- 0.18 * tree_width_years
-strip_width_frac  <- 0.04
+offset1           <- 0.15 * tree_width_years
+strip_width_frac  <- 0.03
 strip_width_years <- strip_width_frac * tree_width_years
 gap_years         <- 0.5
 offset2           <- offset1 + strip_width_years + gap_years
@@ -206,7 +208,7 @@ p2 <- gheatmap(
   p2, island_data,
   offset = offset1, width = strip_width_frac,
   colnames_position = "top", colnames_angle = 90,
-  colnames_offset_y = 1.5, font.size = 3
+  colnames_offset_y = 1, font.size = 4
 ) +
   scale_fill_manual(values = island_colors, name = "Island")
 
@@ -215,16 +217,20 @@ p2 <- gheatmap(
   p2, sbi_data,
   offset = offset2, width = strip_width_frac,
   colnames_position = "top", colnames_angle = 90,
-  colnames_offset_y = 1.5, font.size = 3
+  colnames_offset_y = 1, font.size = 4
 ) +
   scale_fill_manual(values = sbi_colors, name = "SBI")
 
 p2 <- p2 + coord_cartesian(
-  xlim = c(min(p$data$x, na.rm = TRUE) - 5, max(p$data$x, na.rm = TRUE) + 25),
+  xlim = c(min(tree_x_breaks), max(p$data$x, na.rm = TRUE) + offset2 + strip_width_years + 2),
   expand = FALSE,
   clip = "off"   # allow the rotated column-name labels to draw outside the panel
 ) +
-  theme(plot.margin = margin(t = 30, r = 10, b = 10, l = 10))   # extra headroom at the top
+  guides(x = guide_axis(cap = "both")) +
+  theme(
+    plot.margin = margin(t = 30, r = 10, b = 10, l = 20),
+    legend.box.spacing = unit(0, "pt")   # <-- gap between the plot and the legends
+  )
 
 p2
 ```
@@ -237,8 +243,9 @@ p2
 n_tips <- length(beast_tree@phylo$tip.label)
 fig_height <- max(8, n_tips * 0.18)
 
-ggsave(output_plot, plot = p2, width = 16, height = fig_height, units = "in", limitsize = FALSE)
-message("Saved plot to: ", output_plot, " (height: ", round(fig_height, 1), " in)")
+ggsave("Figures/Clade1_time_tree.pdf", plot = p2, width = 18, height = 12, units = "in")
+ggsave("Figures/Clade1_time_tree.svg", plot = p2, width = 18, height = 12, units = "in")
+
 ```
 
 ## Bayesian Skyline Plot
@@ -283,8 +290,8 @@ p_skyline
 ```{r}
 #| label: save-skyline-clade1
 
-ggsave(output_skyline_plot, plot = p_skyline, width = 9, height = 6, units = "in")
-message("Saved plot to: ", output_skyline_plot)
+ggsave("Figures/Clade1_skyline.pdf", plot = p_skyline, width = 9, height = 6, units = "in")
+ggsave("Figures/Clade1_skyline.svg", plot = p_skyline, width = 9, height = 6, units = "in")
 ```
 
 # Clade 2
@@ -302,8 +309,6 @@ tip_label_fields <- c("isolate_ID", "SBI", "Island", "Source", "date")
 tip_label_sep    <- "|"
 
 year_gridline_every <- 5
-output_plot          <- "time_tree_clade2.pdf"
-output_skyline_plot  <- "bayesian_skyline_plot_clade2.pdf"
 skyline_file         <- "Data/Clade2_BS_analysis_2014.712.txt"
 ```
 
@@ -370,16 +375,20 @@ most_recent_tip_date
 p <- ggtree(beast_tree, mrsd = as.character(most_recent_tip_date), ladderize = TRUE) %<+% metadata +
   theme_tree2() +
   geom_range(range = "height_0.95_HPD", color = "steelblue", alpha = 0.4, linewidth = 2) +
-  geom_tippoint(aes(color = Source), size = 2) +
-  geom_tiplab(aes(label = isolate_ID), size = 2, offset = 0.3, align = TRUE, linetype = "dotted") +
+  geom_tippoint(aes(color = Source), size = 3) +
+  geom_tiplab(aes(label = isolate_ID), size = 3.5, offset = 1, align = TRUE, linetype = "dotted") +
   theme(
     panel.grid.major.x = element_line(color = "grey85", linewidth = 0.3),
     panel.grid.minor.x = element_blank(),
-    legend.position = "right"
+    legend.position = "right",
+    axis.text.x  = element_text(size = 12, angle = 45, hjust = 1),   # <-- year labels: size + angle
+    axis.title.x = element_text(size = 14)                           # <-- "Year" axis title
   ) +
   labs(x = "Year", color = "Source")
 
-tree_x_breaks <- scales::pretty_breaks(n = 15)(range(p$data$x, na.rm = TRUE))
+x_pad_past <- 10   # years of extra axis to the left of the root; increase until the bar is covered
+
+tree_x_breaks <- scales::pretty_breaks(n = 20)(range(p$data$x, na.rm = TRUE) - c(x_pad_past, 0))
 p <- p + scale_x_continuous(breaks = tree_x_breaks)
 
 island_data <- metadata |>
@@ -389,18 +398,20 @@ island_data <- metadata |>
 sbi_data <- metadata |> select(Name, SBI) |> column_to_rownames("Name")
 
 tree_width_years  <- diff(range(p$data$x, na.rm = TRUE))
-offset1           <- 0.18 * tree_width_years
-strip_width_frac  <- 0.04
+offset1           <- 0.15 * tree_width_years
+strip_width_frac  <- 0.03
 strip_width_years <- strip_width_frac * tree_width_years
 gap_years         <- 0.5
 offset2           <- offset1 + strip_width_years + gap_years
 
+# The unknown island will appear as white
 island_colors <- c(
   "NI" = "#a6cee3",
   "SI" = "#b2df8a",
   "Unknown" = "#ffffff"
 )
 
+# SBI custom colours to match the other figures, just list them all and the ones needed will be used
 sbi_colors <- c(
   "AY2a" = "#1F77B4", "ASY2c" = "#AEC7E8", "WY12a" = "#FF7F0E", "Y12a" = "#FFBB78",
   "AS2c" = "#2CA02C", "SY2c" = "#98DF8A", "A2a" = "#D62728", "AWY2a" = "#FF9896",
@@ -414,7 +425,7 @@ p2 <- gheatmap(
   p2, island_data,
   offset = offset1, width = strip_width_frac,
   colnames_position = "top", colnames_angle = 90,
-  colnames_offset_y = 1.5, font.size = 3
+  colnames_offset_y = 1, font.size = 4
 ) +
   scale_fill_manual(values = island_colors, name = "Island")
 
@@ -423,16 +434,20 @@ p2 <- gheatmap(
   p2, sbi_data,
   offset = offset2, width = strip_width_frac,
   colnames_position = "top", colnames_angle = 90,
-  colnames_offset_y = 1.5, font.size = 3
+  colnames_offset_y = 1, font.size = 4
 ) +
   scale_fill_manual(values = sbi_colors, name = "SBI")
 
 p2 <- p2 + coord_cartesian(
-  xlim = c(min(p$data$x, na.rm = TRUE) - 5, max(p$data$x, na.rm = TRUE) + 25),
+  xlim = c(min(tree_x_breaks), max(p$data$x, na.rm = TRUE) + offset2 + strip_width_years + 2),
   expand = FALSE,
   clip = "off"   # allow the rotated column-name labels to draw outside the panel
 ) +
-  theme(plot.margin = margin(t = 30, r = 10, b = 10, l = 10))   # extra headroom at the top
+  guides(x = guide_axis(cap = "both")) +
+  theme(
+    plot.margin = margin(t = 30, r = 10, b = 10, l = 20),
+    legend.box.spacing = unit(0, "pt")   # <-- gap between the plot and the legends
+  )
 
 p2
 ```
@@ -445,8 +460,8 @@ p2
 n_tips <- length(beast_tree@phylo$tip.label)
 fig_height <- max(8, n_tips * 0.18)
 
-ggsave(output_plot, plot = p2, width = 16, height = fig_height, units = "in", limitsize = FALSE)
-message("Saved plot to: ", output_plot, " (height: ", round(fig_height, 1), " in)")
+ggsave("Figures/Clade2_time_tree.pdf", plot = p2, width = 18, height = 12, units = "in")
+ggsave("Figures/Clade2_time_tree.svg", plot = p2, width = 18, height = 12, units = "in")
 ```
 
 ## Bayesian Skyline Plot
@@ -491,8 +506,8 @@ p_skyline
 ```{r}
 #| label: save-skyline-clade2
 
-ggsave(output_skyline_plot, plot = p_skyline, width = 9, height = 6, units = "in")
-message("Saved plot to: ", output_skyline_plot)
+ggsave("Figures/Clade2_skyline.pdf", plot =p_skyline , width = 9, height = 6, units = "in")
+ggsave("Figures/Clade2_skyline.svg", plot = p_skyline, width = 9, height = 6, units = "in")
 ```
 
 # Clade 3
@@ -510,8 +525,6 @@ tip_label_fields <- c("isolate_ID", "SBI", "Island", "Source", "date")
 tip_label_sep    <- "|"
 
 year_gridline_every <- 5
-output_plot          <- "time_tree_clade3.pdf"
-output_skyline_plot  <- "bayesian_skyline_plot_clade3.pdf"
 skyline_file         <- "Data/Clade3_BS_analysis_2014.671.txt"
 ```
 
@@ -578,16 +591,20 @@ most_recent_tip_date
 p <- ggtree(beast_tree, mrsd = as.character(most_recent_tip_date), ladderize = TRUE) %<+% metadata +
   theme_tree2() +
   geom_range(range = "height_0.95_HPD", color = "steelblue", alpha = 0.4, linewidth = 2) +
-  geom_tippoint(aes(color = Source), size = 2) +
-  geom_tiplab(aes(label = isolate_ID), size = 2, offset = 0.3, align = TRUE, linetype = "dotted") +
+  geom_tippoint(aes(color = Source), size = 3) +
+  geom_tiplab(aes(label = isolate_ID), size = 3.5, offset = 1, align = TRUE, linetype = "dotted") +
   theme(
     panel.grid.major.x = element_line(color = "grey85", linewidth = 0.3),
     panel.grid.minor.x = element_blank(),
-    legend.position = "right"
+    legend.position = "right",
+    axis.text.x  = element_text(size = 12, angle = 45, hjust = 1),   # <-- year labels: size + angle
+    axis.title.x = element_text(size = 14)                           # <-- "Year" axis title
   ) +
   labs(x = "Year", color = "Source")
 
-tree_x_breaks <- scales::pretty_breaks(n = 15)(range(p$data$x, na.rm = TRUE))
+x_pad_past <- 20   # years of extra axis to the left of the root; increase until the bar is covered
+
+tree_x_breaks <- scales::pretty_breaks(n = 20)(range(p$data$x, na.rm = TRUE) - c(x_pad_past, 0))
 p <- p + scale_x_continuous(breaks = tree_x_breaks)
 
 island_data <- metadata |>
@@ -597,18 +614,20 @@ island_data <- metadata |>
 sbi_data <- metadata |> select(Name, SBI) |> column_to_rownames("Name")
 
 tree_width_years  <- diff(range(p$data$x, na.rm = TRUE))
-offset1           <- 0.18 * tree_width_years
-strip_width_frac  <- 0.04
+offset1           <- 0.15 * tree_width_years
+strip_width_frac  <- 0.03
 strip_width_years <- strip_width_frac * tree_width_years
 gap_years         <- 0.5
 offset2           <- offset1 + strip_width_years + gap_years
 
+# The unknown island will appear as white
 island_colors <- c(
   "NI" = "#a6cee3",
   "SI" = "#b2df8a",
   "Unknown" = "#ffffff"
 )
 
+# SBI custom colours to match the other figures, just list them all and the ones needed will be used
 sbi_colors <- c(
   "AY2a" = "#1F77B4", "ASY2c" = "#AEC7E8", "WY12a" = "#FF7F0E", "Y12a" = "#FFBB78",
   "AS2c" = "#2CA02C", "SY2c" = "#98DF8A", "A2a" = "#D62728", "AWY2a" = "#FF9896",
@@ -622,7 +641,7 @@ p2 <- gheatmap(
   p2, island_data,
   offset = offset1, width = strip_width_frac,
   colnames_position = "top", colnames_angle = 90,
-  colnames_offset_y = 1.5, font.size = 3
+  colnames_offset_y = 1, font.size = 4
 ) +
   scale_fill_manual(values = island_colors, name = "Island")
 
@@ -631,16 +650,20 @@ p2 <- gheatmap(
   p2, sbi_data,
   offset = offset2, width = strip_width_frac,
   colnames_position = "top", colnames_angle = 90,
-  colnames_offset_y = 1.5, font.size = 3
+  colnames_offset_y = 1, font.size = 4
 ) +
   scale_fill_manual(values = sbi_colors, name = "SBI")
 
 p2 <- p2 + coord_cartesian(
-  xlim = c(min(p$data$x, na.rm = TRUE) - 5, max(p$data$x, na.rm = TRUE) + 25),
+  xlim = c(min(tree_x_breaks), max(p$data$x, na.rm = TRUE) + offset2 + strip_width_years + 2),
   expand = FALSE,
   clip = "off"   # allow the rotated column-name labels to draw outside the panel
 ) +
-  theme(plot.margin = margin(t = 30, r = 10, b = 10, l = 10))   # extra headroom at the top
+  guides(x = guide_axis(cap = "both")) +
+  theme(
+    plot.margin = margin(t = 30, r = 10, b = 10, l = 20),
+    legend.box.spacing = unit(0, "pt")   # <-- gap between the plot and the legends
+  )
 
 p2
 ```
@@ -653,8 +676,8 @@ p2
 n_tips <- length(beast_tree@phylo$tip.label)
 fig_height <- max(8, n_tips * 0.18)
 
-ggsave(output_plot, plot = p2, width = 16, height = fig_height, units = "in", limitsize = FALSE)
-message("Saved plot to: ", output_plot, " (height: ", round(fig_height, 1), " in)")
+ggsave("Figures/Clade3_time_tree.pdf", plot = p2, width = 18, height = 12, units = "in")
+ggsave("Figures/Clade3_time_tree.svg", plot = p2, width = 18, height = 12, units = "in")
 ```
 
 ## Bayesian Skyline Plot
@@ -699,6 +722,6 @@ p_skyline
 ```{r}
 #| label: save-skyline-clade3
 
-ggsave(output_skyline_plot, plot = p_skyline, width = 9, height = 6, units = "in")
-message("Saved plot to: ", output_skyline_plot)
+ggsave("Figures/Clade3_skyline.pdf", plot = p_skyline, width = 9, height = 6, units = "in")
+ggsave("Figures/Clade3_skyline.svg", plot = p_skyline, width = 9, height = 6, units = "in")
 ```
