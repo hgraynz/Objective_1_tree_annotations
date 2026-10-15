@@ -155,17 +155,24 @@ most_recent_tip_date
 #| fig-width: 12
 #| fig-height: 8
 
+source_colors <- c(
+  "bovine" = "#E6A86F",
+  "human"  = "#E2BCE4"
+  # add one line per value that unique(metadata$Source) returns
+)
+
 p <- ggtree(beast_tree, mrsd = as.character(most_recent_tip_date), ladderize = TRUE) %<+% metadata +
   theme_tree2() +
   geom_range(range = "height_0.95_HPD", color = "steelblue", alpha = 0.4, linewidth = 2) +
   geom_tippoint(aes(color = Source), size = 3) +
+  scale_color_manual(values = source_colors, name = "Source", na.value = "grey50") +   # custom tip colours
   geom_tiplab(aes(label = isolate_ID), size = 3.5, offset = 1, align = TRUE, linetype = "dotted") +
   theme(
     panel.grid.major.x = element_line(color = "grey85", linewidth = 0.3),
     panel.grid.minor.x = element_blank(),
     legend.position = "right",
-    axis.text.x  = element_text(size = 12, angle = 45, hjust = 1),   # <-- year labels: size + angle
-    axis.title.x = element_text(size = 14)                           # <-- "Year" axis title
+    axis.text.x  = element_text(size = 14, angle = 45, hjust = 1),
+    axis.title.x = element_text(size = 16)
   ) +
   labs(x = "Year", color = "Source")
 
@@ -372,17 +379,24 @@ most_recent_tip_date
 #| fig-width: 16
 #| fig-height: 8
 
+source_colors <- c(
+  "bovine" = "#E6A86F",
+  "human"  = "#E2BCE4"
+  # add one line per value that unique(metadata$Source) returns
+)
+
 p <- ggtree(beast_tree, mrsd = as.character(most_recent_tip_date), ladderize = TRUE) %<+% metadata +
   theme_tree2() +
   geom_range(range = "height_0.95_HPD", color = "steelblue", alpha = 0.4, linewidth = 2) +
   geom_tippoint(aes(color = Source), size = 3) +
+  scale_color_manual(values = source_colors, name = "Source", na.value = "grey50") +   # custom tip colours
   geom_tiplab(aes(label = isolate_ID), size = 3.5, offset = 1, align = TRUE, linetype = "dotted") +
   theme(
     panel.grid.major.x = element_line(color = "grey85", linewidth = 0.3),
     panel.grid.minor.x = element_blank(),
     legend.position = "right",
-    axis.text.x  = element_text(size = 12, angle = 45, hjust = 1),   # <-- year labels: size + angle
-    axis.title.x = element_text(size = 14)                           # <-- "Year" axis title
+    axis.text.x  = element_text(size = 14, angle = 45, hjust = 1),
+    axis.title.x = element_text(size = 16)
   ) +
   labs(x = "Year", color = "Source")
 
@@ -588,17 +602,24 @@ most_recent_tip_date
 #| fig-width: 16
 #| fig-height: 8
 
+source_colors <- c(
+  "bovine" = "#E6A86F",
+  "human"  = "#E2BCE4"
+  # add one line per value that unique(metadata$Source) returns
+)
+
 p <- ggtree(beast_tree, mrsd = as.character(most_recent_tip_date), ladderize = TRUE) %<+% metadata +
   theme_tree2() +
   geom_range(range = "height_0.95_HPD", color = "steelblue", alpha = 0.4, linewidth = 2) +
   geom_tippoint(aes(color = Source), size = 3) +
+  scale_color_manual(values = source_colors, name = "Source", na.value = "grey50") +   # custom tip colours
   geom_tiplab(aes(label = isolate_ID), size = 3.5, offset = 1, align = TRUE, linetype = "dotted") +
   theme(
     panel.grid.major.x = element_line(color = "grey85", linewidth = 0.3),
     panel.grid.minor.x = element_blank(),
     legend.position = "right",
-    axis.text.x  = element_text(size = 12, angle = 45, hjust = 1),   # <-- year labels: size + angle
-    axis.title.x = element_text(size = 14)                           # <-- "Year" axis title
+    axis.text.x  = element_text(size = 14, angle = 45, hjust = 1),
+    axis.title.x = element_text(size = 16)
   ) +
   labs(x = "Year", color = "Source")
 
